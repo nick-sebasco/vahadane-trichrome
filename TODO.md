@@ -9,6 +9,47 @@
 --what is standard practice for setting this.
 + [] how do we evaluate how well vahadane is working
 
++ [] Add cohort-based Wasserstein distance evaluation (paper-inspired)
+Goal:
+- Quantify stain-normalization consistency by comparing a reference cohort (ex: NW)
+	to itself and to external cohorts (ex: BU, KD) using pairwise Wasserstein distances.
+
+Implementation plan:
+- Add utility function for cohort evaluation:
+	- input: cohorts dict[str, list[path]], reference_cohort key
+	- configurable feature domain: "od" (default), optional "lab_l"
+	- optional tissue masking using luminosity threshold
+	- optional per-image pixel subsampling cap for runtime control
+- Implement 1D Wasserstein in pure NumPy (no new hard dependency):
+	- validate against SciPy in tests when SciPy is available (optional test branch)
+	- use scalar distributions consistently (do not pool unrelated channels silently)
+- Compute and return:
+	- reference internal pair distances: ref <-> ref
+	- cross distances: ref <-> other cohort for each other cohort
+	- summary statistics per comparison: n_pairs, mean, std, median, p05, p95
+- Add LLN/convergence analysis helper:
+	- randomize pair order
+	- plot running mean Wasserstein vs number of pairs
+	- verify convergence behavior for increasing sample size
+
+Validation / experiments:
+- Run NW as reference cohort:
+	- NW <-> NW (internal baseline)
+	- NW <-> BU
+	- NW <-> KD
+- Expectation: mean(NW<->NW) < mean(NW<->BU) and mean(NW<->NW) < mean(NW<->KD)
+- Repeat with fixed random seeds to check stability.
+
+Artifacts to save:
+- CSV/JSON summary table of pairwise statistics
+- LLN convergence plots per comparison
+- optional histogram/KDE overlays for distance distributions
+
+Definition of done:
+- Utility callable from script/notebook with arbitrary number of cohorts
+- Unit tests for 1D Wasserstein numerical sanity (symmetry, identity, shift behavior)
+- End-to-end run on NW/BU/KD with saved outputs and brief interpretation note
+
 + [] show within slide normalization
 + [] show within cohort normalization
 + [] show NW-BU

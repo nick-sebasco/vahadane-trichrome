@@ -9,7 +9,7 @@ import pytest
 import matplotlib.pyplot as plt
 
 from vahadane_trichrome import VahadaneTrichromeNormalizer
-from vahadane_trichrome import _match_source_rows_to_target
+from vahadane_trichrome.core import _match_source_rows_to_target
 
 
 # Helper functions for tests
@@ -741,3 +741,4 @@ def test_save_load_fit_state_metadata_optional_defaults_to_empty_dict(tmp_path: 
 
 	assert metadata == {}
 	assert loaded.fit_metadata == {}
+
