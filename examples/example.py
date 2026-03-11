@@ -58,6 +58,7 @@ IMAGE_LIBRARY = {
         TEST_DATA_DIR,
         "NW_NW_Trichrome_Box_1_LF_RF_SSCMH27_BASE_LF_04-27-11_-_2022-11-10_16.02.34_left.png",
     ),
+    "NW_MULTI": os.path.join(TEST_DATA_DIR, "NW_2_CONCAT.png"),
     "NW_RIGHT": os.path.join(
         TEST_DATA_DIR,
         "NW_NW_Trichrome_Box_1_LF_RF_SSCMH27_BASE_LF_04-27-11_-_2022-11-10_16.02.34_right.png",
@@ -272,6 +273,19 @@ def example_bu_to_nw_external() -> None:
         reference_key="NW_LEFT",
     )
 
+
+def example_bu_to_multi_target_nw_external() -> None:
+    """External cohort example: input BU_A, reference NW_LEFT.
+
+    Applies 2 NW references via handcrafted concat
+    to BU tissue.
+    """
+    run_normalization_example(
+        example_name="bu_to_multi_target_nw_external",
+        input_key="BU_A",
+        reference_key="NW_MULTI",
+    )
+
 def main() -> None:
     """Run exactly one example.
 
@@ -280,7 +294,8 @@ def main() -> None:
     # example_bu_to_bu_cross_slide()  # default
     # example_nw_left_to_right_same_slide()
     # example_kd_to_nw_external()
-    example_bu_to_nw_external()
+    #example_bu_to_nw_external()
+    example_bu_to_multi_target_nw_external()
 
 
 if __name__ == "__main__":

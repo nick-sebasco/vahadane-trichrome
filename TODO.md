@@ -2,8 +2,15 @@
 
 ## Experiments
 
-+ [] look into implementation of multi-reference 
++ [x] look into implementation of multi-reference
+-- A. Matts idea of concatenating images is very good, I can do that.
+-- B. Since it is mathematically valid to average W if we find W's separately for each image
+    we can solve for each W in parallel, so that might be an advantage over A
+
+-- paper uses 80:20 rule. we could take a random 20% sample of reference dataset
+
 + [] How long does this take to run?  do a break down by plotting run time at different zarr levels: 6, 4, 2, 0 and compare with Reinhardt
++ [] what is highest zarr level where I can still learn the black/ brown stain vector in trichrome
 + [] show effect of poor thresholding
 + [] show sparsity lambda effect
 --what is standard practice for setting this.

@@ -606,6 +606,24 @@ def test_fit_transform_percentile_scaling_aligns_source_to_target_statistics() -
 	assert np.all(rel_err < 0.18)
 
 
+def test_compute_channel_scale_factors_clips_runaway_percentile_ratios() -> None:
+	"""Extreme target/source percentile ratios should be clipped safely.
+
+	This guards against the black-tissue failure mode where a nearly absent source
+	stain channel receives an arbitrarily large multiplicative scale factor.
+	"""
+	max_c_target = np.array([[1.2, 0.8, 1.5]], dtype=np.float64)
+	max_c_source = np.array([[0.4, 0.2, 0.01]], dtype=np.float64)
+
+	scale = VahadaneTrichromeNormalizer._compute_channel_scale_factors(
+		max_c_target,
+		max_c_source,
+		max_scale_factor=4.0,
+	)
+
+	assert np.allclose(scale, np.array([[3.0, 4.0, 4.0]], dtype=np.float64))
+
+
 def test_real_trichrome_integration_runs_and_logs_outputs(tmp_path: Path) -> None:
 	"""Integration check on provided real trichrome image.
 

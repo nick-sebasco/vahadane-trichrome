@@ -1,9 +1,11 @@
 """Core Vahadane-style extractor and normalizer implementation."""
 
+import concurrent.futures
 import itertools
 import json
 import logging
 import os
+from collections.abc import Sequence
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -37,6 +39,15 @@ def _match_source_rows_to_target(
     target_dictionary: np.ndarray,
 ) -> np.ndarray:
     """Align source stain rows to target stain rows by best global similarity."""
+    best_perm = _get_best_alignment_permutation(source_dictionary, target_dictionary)
+    return source_dictionary[list(best_perm), :]
+
+
+def _get_best_alignment_permutation(
+    source_dictionary: np.ndarray,
+    target_dictionary: np.ndarray,
+) -> tuple[int, ...]:
+    """Return the best row permutation aligning source to target."""
     if source_dictionary.shape != target_dictionary.shape:
         msg = (
             "Source and target stain matrices must have the same shape, got "
@@ -57,7 +68,103 @@ def _match_source_rows_to_target(
             best_score = score
             best_perm = perm
 
-    return source_dictionary[list(best_perm), :]
+    return tuple(best_perm)
+
+
+def _stain_matrix_alignment_score(
+    source_dictionary: np.ndarray,
+    target_dictionary: np.ndarray,
+) -> float:
+    """Return best global cosine-similarity score between two stain matrices."""
+    if source_dictionary.shape != target_dictionary.shape:
+        msg = (
+            "Source and target stain matrices must have the same shape, got "
+            f"{source_dictionary.shape} and {target_dictionary.shape}."
+        )
+        raise ValueError(msg)
+
+    source_norm = source_dictionary / np.linalg.norm(source_dictionary, axis=1, keepdims=True)
+    target_norm = target_dictionary / np.linalg.norm(target_dictionary, axis=1, keepdims=True)
+    similarity = source_norm @ target_norm.T
+    best_perm = _get_best_alignment_permutation(source_dictionary, target_dictionary)
+    return float(similarity[list(best_perm), range(source_dictionary.shape[0])].sum())
+
+
+def _select_alignment_anchor_index(stain_matrices: Sequence[np.ndarray]) -> int:
+    """Choose the medoid-like anchor index for a list of stain matrices."""
+    if len(stain_matrices) == 0:
+        raise ValueError("stain_matrices must contain at least one matrix.")
+    if len(stain_matrices) == 1:
+        return 0
+
+    scores = np.zeros(len(stain_matrices), dtype=np.float64)
+    for i, anchor in enumerate(stain_matrices):
+        for matrix in stain_matrices:
+            scores[i] += _stain_matrix_alignment_score(matrix, anchor)
+    return int(np.argmax(scores))
+
+
+def _align_stain_matrices_to_anchor(
+    stain_matrices: Sequence[np.ndarray],
+    anchor_index: int | None = None,
+) -> tuple[list[np.ndarray], list[tuple[int, ...]], int]:
+    """Align all stain matrices to a shared anchor basis."""
+    if len(stain_matrices) == 0:
+        raise ValueError("stain_matrices must contain at least one matrix.")
+
+    resolved_anchor_index = (
+        _select_alignment_anchor_index(stain_matrices)
+        if anchor_index is None
+        else int(anchor_index)
+    )
+    anchor = stain_matrices[resolved_anchor_index]
+    permutations = [
+        _get_best_alignment_permutation(matrix, anchor)
+        for matrix in stain_matrices
+    ]
+    aligned = [
+        matrix[list(perm), :]
+        for matrix, perm in zip(stain_matrices, permutations)
+    ]
+    return aligned, permutations, resolved_anchor_index
+
+
+def _aggregate_stain_matrices(
+    stain_matrices: Sequence[np.ndarray],
+    method: str = "median",
+) -> np.ndarray:
+    """Aggregate aligned stain matrices across references."""
+    if len(stain_matrices) == 0:
+        raise ValueError("stain_matrices must contain at least one matrix.")
+
+    stack = np.stack(stain_matrices, axis=0)
+    if method == "median":
+        aggregated = np.median(stack, axis=0)
+    elif method == "mean":
+        aggregated = np.mean(stack, axis=0)
+    else:
+        raise ValueError(f"Unsupported aggregation method: {method}")
+
+    return aggregated / np.maximum(np.linalg.norm(aggregated, axis=1, keepdims=True), 1e-8)
+
+
+def _extract_single_reference_state(
+    target_img: np.ndarray,
+    extractor_params: dict,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Extract per-reference stain matrix and channel scaling statistics."""
+    extractor = VahadaneTrichromeExtractor(**extractor_params)
+    stain_matrix = extractor.get_stain_matrix(target_img)
+    target_tissue_mask = extractor.last_tissue_mask
+
+    target_concentrations = VahadaneTrichromeNormalizer.get_concentrations(target_img, stain_matrix)
+    target_mask_flat = target_tissue_mask.reshape(-1) if target_tissue_mask is not None else None
+    if target_mask_flat is not None and np.any(target_mask_flat):
+        target_concentrations_for_scale = target_concentrations[target_mask_flat]
+    else:
+        target_concentrations_for_scale = target_concentrations
+    max_c_target = np.percentile(target_concentrations_for_scale, 99, axis=0, keepdims=True)
+    return stain_matrix, max_c_target
 
 
 class VahadaneTrichromeExtractor:
@@ -81,6 +188,7 @@ class VahadaneTrichromeExtractor:
         transform_algorithm: str = "lasso_lars",
         dl_max_iter: int = 100,
         dl_transform_max_iter: int = 1000,
+        dl_n_jobs: int | None = -1,
     ) -> None:
         """Initialize :class:`VahadaneTrichromeExtractor`."""
         logger.warning(
@@ -106,7 +214,30 @@ class VahadaneTrichromeExtractor:
         self.__transform_algorithm = transform_algorithm
         self.__dl_max_iter = dl_max_iter
         self.__dl_transform_max_iter = dl_transform_max_iter
+        self.__dl_n_jobs = dl_n_jobs
         self._last_tissue_mask: np.ndarray | None = None
+
+    def get_params(self) -> dict:
+        """Return extractor initialization parameters."""
+        return {
+            "luminosity_threshold": self.__luminosity_threshold,
+            "use_connected_components": self.__use_connected_components,
+            "min_component_size_fraction": self.__min_component_size_fraction,
+            "min_component_size_relative_to_largest": self.__min_component_size_relative_to_largest,
+            "cumulative_foreground_coverage": self.__cumulative_foreground_coverage,
+            "connected_components_connectivity": self.__connected_components_connectivity,
+            "connected_components_fail_safe": self.__connected_components_fail_safe,
+            "regularizer": self.__regularizer,
+            "n_components": self.__n_components,
+            "sort_mode": self.__sort_mode,
+            "max_tissue_pixels": self.__max_tissue_pixels,
+            "random_state": self.__random_state,
+            "fit_algorithm": self.__fit_algorithm,
+            "transform_algorithm": self.__transform_algorithm,
+            "dl_max_iter": self.__dl_max_iter,
+            "dl_transform_max_iter": self.__dl_transform_max_iter,
+            "dl_n_jobs": self.__dl_n_jobs,
+        }
 
     @property
     def last_tissue_mask(self) -> np.ndarray | None:
@@ -152,6 +283,7 @@ class VahadaneTrichromeExtractor:
             max_iter=self.__dl_max_iter,
             transform_max_iter=self.__dl_transform_max_iter,
             random_state=self.__random_state,
+            n_jobs=self.__dl_n_jobs,
         )
         dl.fit(X=img_od)
         dictionary = dl.components_
@@ -187,6 +319,8 @@ class VahadaneTrichromeNormalizer:
         transform_algorithm: str = "lasso_lars",
         dl_max_iter: int = 100,
         dl_transform_max_iter: int = 1000,
+        dl_n_jobs: int | None = -1,
+        max_concentration_scale_factor: float | None = 4.0,
     ) -> None:
         self.extractor = extractor or VahadaneTrichromeExtractor(
             luminosity_threshold=luminosity_threshold,
@@ -205,7 +339,9 @@ class VahadaneTrichromeNormalizer:
             transform_algorithm=transform_algorithm,
             dl_max_iter=dl_max_iter,
             dl_transform_max_iter=dl_transform_max_iter,
+            dl_n_jobs=dl_n_jobs,
         )
+        self.max_concentration_scale_factor = max_concentration_scale_factor
         self.stain_matrix_target: np.ndarray | None = None
         self.stain_matrix_source_raw: np.ndarray | None = None
         self.stain_matrix_source_aligned: np.ndarray | None = None
@@ -347,6 +483,25 @@ class VahadaneTrichromeNormalizer:
             concentrations = np.clip(concentrations, 0, None)
         return concentrations
 
+    @staticmethod
+    def _compute_channel_scale_factors(
+        max_c_target: np.ndarray,
+        max_c_source: np.ndarray,
+        max_scale_factor: float | None,
+    ) -> np.ndarray:
+        """Compute robust per-channel concentration scaling factors.
+
+        Unbounded percentile ratios can explode when a stain channel is weak or
+        nearly absent in the source but strong in the target. That drives the OD
+        reconstruction to saturation and yields near-black tissue.
+        """
+        scale_factors = max_c_target / np.maximum(max_c_source, 1e-8)
+        if max_scale_factor is not None:
+            if max_scale_factor <= 0:
+                raise ValueError("max_scale_factor must be > 0 when provided.")
+            scale_factors = np.minimum(scale_factors, max_scale_factor)
+        return scale_factors
+
     def fit(self, target: np.ndarray) -> None:
         """Fit target stain basis and target concentration scaling statistics."""
         self.stain_matrix_target = self.extractor.get_stain_matrix(target)
@@ -358,6 +513,107 @@ class VahadaneTrichromeNormalizer:
         else:
             target_concentrations_for_scale = target_concentrations
         self.max_c_target = np.percentile(target_concentrations_for_scale, 99, axis=0, keepdims=True)
+
+    def fit_multi_target(
+        self,
+        targets: Sequence[np.ndarray],
+        *,
+        aggregation: str = "median",
+        max_workers: int | None = None,
+        anchor_index: int | None = None,
+    ) -> None:
+        """Fit a multi-target reference state from several target images.
+
+        This implements an Avg-post style workflow, but uses robust aggregation
+        (``median`` by default) after explicit stain-row alignment.
+
+        Args:
+            targets (Sequence[numpy.ndarray]):
+                Reference RGB images.
+            aggregation (str):
+                Aggregation method across aligned reference matrices. Supported:
+                ``"median"`` and ``"mean"``.
+            max_workers (int | None):
+                Number of worker processes used to extract per-target stain
+                matrices. ``None`` uses all available cores. When processing
+                targets in parallel, extractor-side ``dl_n_jobs`` is forced to 1
+                per worker to avoid nested oversubscription.
+            anchor_index (int | None):
+                Optional explicit anchor matrix index for alignment. ``None``
+                selects a medoid-like anchor automatically.
+
+        """
+        if len(targets) == 0:
+            raise ValueError("targets must contain at least one image.")
+        if len(targets) == 1:
+            self.fit(targets[0])
+            return
+
+        target_list = [np.asarray(target, dtype=np.uint8) for target in targets]
+
+        if isinstance(self.extractor, VahadaneTrichromeExtractor):
+            extractor_params = self.extractor.get_params()
+        else:
+            extractor_params = None
+
+        use_parallel = extractor_params is not None and (max_workers is None or max_workers != 1)
+        if use_parallel:
+            worker_params = dict(extractor_params)
+            worker_params["dl_n_jobs"] = 1
+            resolved_max_workers = max_workers or os.cpu_count() or 1
+            with concurrent.futures.ProcessPoolExecutor(max_workers=resolved_max_workers) as executor:
+                reference_states = list(
+                    executor.map(
+                        _extract_single_reference_state,
+                        target_list,
+                        [worker_params] * len(target_list),
+                    )
+                )
+        else:
+            reference_states = []
+            for target in target_list:
+                stain_matrix = self.extractor.get_stain_matrix(target)
+                target_tissue_mask = self.extractor.last_tissue_mask
+                target_concentrations = self.get_concentrations(target, stain_matrix)
+                target_mask_flat = target_tissue_mask.reshape(-1) if target_tissue_mask is not None else None
+                if target_mask_flat is not None and np.any(target_mask_flat):
+                    target_concentrations_for_scale = target_concentrations[target_mask_flat]
+                else:
+                    target_concentrations_for_scale = target_concentrations
+                max_c_target = np.percentile(target_concentrations_for_scale, 99, axis=0, keepdims=True)
+                reference_states.append((stain_matrix, max_c_target))
+
+        stain_matrices = [state[0] for state in reference_states]
+        scale_vectors = [state[1] for state in reference_states]
+
+        aligned_stain_matrices, permutations, resolved_anchor_index = _align_stain_matrices_to_anchor(
+            stain_matrices,
+            anchor_index=anchor_index,
+        )
+        aligned_scale_vectors = [
+            scale_vector[:, list(perm)]
+            for scale_vector, perm in zip(scale_vectors, permutations)
+        ]
+
+        self.stain_matrix_target = _aggregate_stain_matrices(
+            aligned_stain_matrices,
+            method=aggregation,
+        )
+        scale_stack = np.stack(aligned_scale_vectors, axis=0)
+        if aggregation == "median":
+            self.max_c_target = np.median(scale_stack, axis=0)
+        elif aggregation == "mean":
+            self.max_c_target = np.mean(scale_stack, axis=0)
+        else:
+            raise ValueError(f"Unsupported aggregation method: {aggregation}")
+
+        self.target_tissue_mask = None
+        self.fit_metadata = {
+            "fit_mode": "multi_target",
+            "n_targets": len(target_list),
+            "aggregation": aggregation,
+            "anchor_index": resolved_anchor_index,
+        }
 
     def save_fit_state(self, file_path: str, metadata: dict | None = None) -> str:
         """Persist fitted target state for reuse across future transforms."""
@@ -434,7 +690,12 @@ class VahadaneTrichromeNormalizer:
         else:
             source_concentrations_for_scale = source_concentrations
         max_c_source = np.percentile(source_concentrations_for_scale, 99, axis=0, keepdims=True)
-        source_concentrations *= self.max_c_target / np.maximum(max_c_source, 1e-8)
+        scale_factors = self._compute_channel_scale_factors(
+            self.max_c_target,
+            max_c_source,
+            self.max_concentration_scale_factor,
+        )
+        source_concentrations *= scale_factors
 
         transformed = 255 * np.exp(-1 * np.dot(source_concentrations, self.stain_matrix_target))
         transformed = np.clip(transformed, 0, 255).reshape(img.shape).astype(np.uint8)
