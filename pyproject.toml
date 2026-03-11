@@ -1,0 +1,26 @@
+[tool.poetry]
+name = "vahadane-trichrome"
+version = "0.1.0"
+description = "Vahadane-style stain extraction and normalization for Mason's Trichrome workflows."
+authors = ["Sebasn <sebasn@example.com>"]
+readme = "README.md"
+license = "MIT"
+packages = [{ include = "vahadane_trichrome", from = "src" }]
+
+[tool.poetry.dependencies]
+python = ">=3.11,<3.13"
+numpy = "^2.2.0"
+scikit-learn = "^1.6.0"
+matplotlib = "^3.10.0"
+zarr = "^3.0.0"
+
+[tool.poetry.group.dev.dependencies]
+pytest = "^8.3.0"
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]
+
+[build-system]
+requires = ["poetry-core>=1.9.0"]
+build-backend = "poetry.core.masonry.api"

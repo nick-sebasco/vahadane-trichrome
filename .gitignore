@@ -1,0 +1,41 @@
+# Byte-compiled / cache
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Tool caches
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Build / packaging
+build/
+dist/
+*.egg-info/
+
+# Local experiments and generated outputs
+LOCAL/
+outputs/
+examples/example_data/
+tests/test_data/
+tests/test_outputs/
+
+# Image and slide assets (commit only if explicitly un-ignored)
+*.png
+*.jpg
+*.jpeg
+*.tif
+*.tiff
+*.svs
+*.ndpi
+*.mrxs
+*.jp2
+
+# OS/editor noise
+.DS_Store
+Thumbs.db
