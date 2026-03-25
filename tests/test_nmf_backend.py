@@ -11,7 +11,7 @@ from vahadane_trichrome import VahadaneTrichromeExtractor
 from vahadane_trichrome import VahadaneTrichromeNormalizer
 from vahadane_trichrome.cli import _build_parser
 from vahadane_trichrome.cli import run_cli
-import vahadane_trichrome.core as core_module
+import vahadane_trichrome.methods.vahadane as core_module
 from vahadane_trichrome.core import _match_source_rows_to_target
 
 

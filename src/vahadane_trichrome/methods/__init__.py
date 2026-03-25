@@ -1,14 +1,11 @@
-"""Public package API for vahadane_trichrome."""
+"""Normalization method implementations."""
 
 from .histogram_matching import HistogramMatchingNormalizer
 from .histogram_matching import build_histogram_specification_lut
 from .histogram_matching import histogram_specification
 from .histogram_matching import match_channel_histogram
-from .methods.vahadane import VahadaneTrichromeExtractor
-from .methods.vahadane import VahadaneTrichromeNormalizer
-from .utils import get_tissue_mask
-from .utils import get_luminosity_tissue_mask
-from .utils import rgb2od
+from .vahadane import VahadaneTrichromeExtractor
+from .vahadane import VahadaneTrichromeNormalizer
 
 __all__ = [
     "VahadaneTrichromeExtractor",
@@ -17,7 +14,4 @@ __all__ = [
     "build_histogram_specification_lut",
     "match_channel_histogram",
     "histogram_specification",
-    "rgb2od",
-    "get_luminosity_tissue_mask",
-    "get_tissue_mask",
 ]

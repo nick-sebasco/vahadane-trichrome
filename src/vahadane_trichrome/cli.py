@@ -1,4 +1,4 @@
-"""Command-line interface for Vahadane trichrome normalization."""
+"""Command-line interface for image normalization workflows."""
 
 import argparse
 import json
@@ -7,7 +7,8 @@ from pathlib import Path
 import matplotlib.pyplot as plt
 import numpy as np
 
-from .core import VahadaneTrichromeNormalizer
+from .histogram_matching import HistogramMatchingNormalizer
+from .methods.vahadane import VahadaneTrichromeNormalizer
 
 
 def _str_to_bool(value: str) -> bool:
@@ -26,6 +27,16 @@ def _normalize_backend(value: str) -> str:
     raise argparse.ArgumentTypeError(
         "Invalid backend value: "
         f"{value}. Expected one of: dictionary_learning, dictionary-learning, nmf."
+    )
+
+
+def _normalize_method(value: str) -> str:
+    normalized = value.strip().lower().replace("-", "_")
+    if normalized in {"vahadane", "histogram_matching"}:
+        return normalized
+    raise argparse.ArgumentTypeError(
+        "Invalid method value: "
+        f"{value}. Expected one of: vahadane, histogram_matching, histogram-matching."
     )
 
 
@@ -58,9 +69,15 @@ def _load_rgb_uint8(path: Path) -> np.ndarray:
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="vahadane-trichrome",
-        description="Run single- or multi-reference Vahadane-style trichrome normalization.",
+        description="Run Vahadane or histogram-matching image normalization.",
     )
     parser.add_argument("--source", type=Path, required=True, help="Path to source RGB image.")
+    parser.add_argument(
+        "--method",
+        type=_normalize_method,
+        default="vahadane",
+        help="Normalization method. Use 'vahadane' for stain-basis normalization or 'histogram_matching' for per-channel histogram specification.",
+    )
     parser.add_argument(
         "--backend",
         type=_normalize_backend,
@@ -204,15 +221,53 @@ def _make_normalizer(args: argparse.Namespace) -> VahadaneTrichromeNormalizer:
     )
 
 
-def run_cli(args: argparse.Namespace) -> int:
-    source_rgb = _load_rgb_uint8(args.source)
-    reference_rgbs = [_load_rgb_uint8(path) for path in args.reference]
+def _run_histogram_matching_cli(
+    args: argparse.Namespace,
+    source_rgb: np.ndarray,
+    reference_rgbs: list[np.ndarray],
+) -> tuple[np.ndarray, str, dict]:
+    if len(reference_rgbs) != 1:
+        raise ValueError("--method histogram_matching currently requires exactly one reference image.")
+    if args.save_swatches:
+        raise ValueError("--save-swatches is only supported for --method vahadane.")
+    if args.save_roi_images:
+        raise ValueError("--save-roi-images is only supported for --method vahadane.")
+    if args.save_fit_state is not None:
+        raise ValueError("--save-fit-state is only supported for --method vahadane.")
 
-    if (args.save_swatches or args.save_roi_images) and args.artifact_dir is None:
-        raise ValueError("--save-swatches and --save-roi-images require --artifact-dir.")
-    if args.save_roi_images and len(reference_rgbs) != 1:
-        raise ValueError("--save-roi-images currently requires exactly one reference image.")
+    normalizer = HistogramMatchingNormalizer(
+        luminosity_threshold=args.luminosity_threshold,
+        use_connected_components=args.use_connected_components,
+        min_component_size_fraction=args.min_component_size_fraction,
+        min_component_size_relative_to_largest=args.min_component_size_relative_to_largest,
+        cumulative_foreground_coverage=args.cumulative_foreground_coverage,
+        connected_components_connectivity=args.connected_components_connectivity,
+        connected_components_fail_safe=args.connected_components_fail_safe,
+    ).fit(reference_rgbs[0])
+    normalized_rgb = normalizer.transform(source_rgb, apply_source_tissue_mask=True)
+    metadata = {
+        "method": args.method,
+        "source": str(args.source),
+        "references": [str(path) for path in args.reference],
+        "output": str(args.output),
+        "fit_mode": "single_target",
+        "apply_source_tissue_mask": True,
+        "luminosity_threshold": args.luminosity_threshold,
+        "use_connected_components": args.use_connected_components,
+        "min_component_size_fraction": args.min_component_size_fraction,
+        "min_component_size_relative_to_largest": args.min_component_size_relative_to_largest,
+        "cumulative_foreground_coverage": args.cumulative_foreground_coverage,
+        "connected_components_connectivity": args.connected_components_connectivity,
+        "connected_components_fail_safe": args.connected_components_fail_safe,
+    }
+    return normalized_rgb, "single_target", metadata
 
+
+def _run_vahadane_cli(
+    args: argparse.Namespace,
+    source_rgb: np.ndarray,
+    reference_rgbs: list[np.ndarray],
+) -> tuple[np.ndarray, str, dict, VahadaneTrichromeNormalizer]:
     normalizer = _make_normalizer(args)
     extractor_params = normalizer.extractor.get_params()
     if len(reference_rgbs) == 1:
@@ -231,6 +286,66 @@ def run_cli(args: argparse.Namespace) -> int:
         source_rgb,
         apply_source_tissue_mask=args.apply_source_tissue_mask,
     )
+    metadata = {
+        "method": args.method,
+        "source": str(args.source),
+        "references": [str(path) for path in args.reference],
+        "output": str(args.output),
+        "backend": args.backend,
+        "fit_mode": fit_mode,
+        "multi_target_aggregation": args.multi_target_aggregation if len(reference_rgbs) > 1 else None,
+        "multi_target_max_workers": args.multi_target_max_workers,
+        "multi_target_anchor_index": args.multi_target_anchor_index,
+        "luminosity_threshold": args.luminosity_threshold,
+        "use_connected_components": args.use_connected_components,
+        "min_component_size_fraction": args.min_component_size_fraction,
+        "min_component_size_relative_to_largest": args.min_component_size_relative_to_largest,
+        "cumulative_foreground_coverage": args.cumulative_foreground_coverage,
+        "connected_components_connectivity": args.connected_components_connectivity,
+        "connected_components_fail_safe": args.connected_components_fail_safe,
+        "regularizer": extractor_params["regularizer"],
+        "n_components": args.n_components,
+        "sort_mode": args.sort_mode,
+        "max_tissue_pixels": args.max_tissue_pixels,
+        "random_state": args.random_state,
+        "fit_algorithm": args.fit_algorithm,
+        "transform_algorithm": args.transform_algorithm,
+        "dl_max_iter": args.dl_max_iter,
+        "dl_transform_max_iter": args.dl_transform_max_iter,
+        "dl_n_jobs": args.dl_n_jobs,
+        "nmf_init": args.nmf_init,
+        "nmf_solver": args.nmf_solver,
+        "nmf_beta_loss": args.nmf_beta_loss,
+        "nmf_tol": args.nmf_tol,
+        "nmf_max_iter": args.nmf_max_iter,
+        "nmf_shuffle": args.nmf_shuffle,
+        "max_concentration_scale_factor": args.max_concentration_scale_factor,
+    }
+    return normalized_rgb, fit_mode, metadata, normalizer
+
+
+def run_cli(args: argparse.Namespace) -> int:
+    source_rgb = _load_rgb_uint8(args.source)
+    reference_rgbs = [_load_rgb_uint8(path) for path in args.reference]
+
+    if (args.save_swatches or args.save_roi_images) and args.artifact_dir is None:
+        raise ValueError("--save-swatches and --save-roi-images require --artifact-dir.")
+    if args.method == "vahadane" and args.save_roi_images and len(reference_rgbs) != 1:
+        raise ValueError("--save-roi-images currently requires exactly one reference image.")
+
+    if args.method == "histogram_matching":
+        normalized_rgb, fit_mode, metadata = _run_histogram_matching_cli(
+            args,
+            source_rgb,
+            reference_rgbs,
+        )
+        normalizer = None
+    else:
+        normalized_rgb, fit_mode, metadata, normalizer = _run_vahadane_cli(
+            args,
+            source_rgb,
+            reference_rgbs,
+        )
 
     args.output.parent.mkdir(parents=True, exist_ok=True)
     plt.imsave(args.output, normalized_rgb)
@@ -238,45 +353,11 @@ def run_cli(args: argparse.Namespace) -> int:
     artifact_dir = args.artifact_dir
     if artifact_dir is not None:
         artifact_dir.mkdir(parents=True, exist_ok=True)
-        metadata = {
-            "source": str(args.source),
-            "references": [str(path) for path in args.reference],
-            "output": str(args.output),
-            "backend": args.backend,
-            "fit_mode": fit_mode,
-            "multi_target_aggregation": args.multi_target_aggregation if len(reference_rgbs) > 1 else None,
-            "multi_target_max_workers": args.multi_target_max_workers,
-            "multi_target_anchor_index": args.multi_target_anchor_index,
-            "luminosity_threshold": args.luminosity_threshold,
-            "use_connected_components": args.use_connected_components,
-            "min_component_size_fraction": args.min_component_size_fraction,
-            "min_component_size_relative_to_largest": args.min_component_size_relative_to_largest,
-            "cumulative_foreground_coverage": args.cumulative_foreground_coverage,
-            "connected_components_connectivity": args.connected_components_connectivity,
-            "connected_components_fail_safe": args.connected_components_fail_safe,
-            "regularizer": extractor_params["regularizer"],
-            "n_components": args.n_components,
-            "sort_mode": args.sort_mode,
-            "max_tissue_pixels": args.max_tissue_pixels,
-            "random_state": args.random_state,
-            "fit_algorithm": args.fit_algorithm,
-            "transform_algorithm": args.transform_algorithm,
-            "dl_max_iter": args.dl_max_iter,
-            "dl_transform_max_iter": args.dl_transform_max_iter,
-            "dl_n_jobs": args.dl_n_jobs,
-            "nmf_init": args.nmf_init,
-            "nmf_solver": args.nmf_solver,
-            "nmf_beta_loss": args.nmf_beta_loss,
-            "nmf_tol": args.nmf_tol,
-            "nmf_max_iter": args.nmf_max_iter,
-            "nmf_shuffle": args.nmf_shuffle,
-            "max_concentration_scale_factor": args.max_concentration_scale_factor,
-        }
         (artifact_dir / "run_metadata.json").write_text(json.dumps(metadata, indent=2), encoding="utf-8")
 
-        if args.save_swatches:
+        if args.method == "vahadane" and args.save_swatches:
             normalizer.save_stain_vector_swatches(str(artifact_dir), prefix="run", rgb=True)
-        if args.save_roi_images and len(reference_rgbs) == 1:
+        if args.method == "vahadane" and args.save_roi_images and len(reference_rgbs) == 1:
             normalizer.save_roi_images(
                 source_img=source_rgb,
                 target_img=reference_rgbs[0],
@@ -284,13 +365,14 @@ def run_cli(args: argparse.Namespace) -> int:
                 prefix="run",
             )
 
-    if args.save_fit_state is not None:
+    if args.method == "vahadane" and args.save_fit_state is not None:
         args.save_fit_state.parent.mkdir(parents=True, exist_ok=True)
         normalizer.save_fit_state(str(args.save_fit_state), metadata={"fit_mode": fit_mode})
 
     print(f"Saved normalized image: {args.output}")
+    print(f"Method: {args.method}")
     print(f"Fit mode: {fit_mode}")
-    if len(reference_rgbs) > 1:
+    if args.method == "vahadane" and len(reference_rgbs) > 1:
         print(f"Multi-target aggregation: {args.multi_target_aggregation}")
     return 0
 
