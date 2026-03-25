@@ -1,19 +1,17 @@
 #!/bin/bash
-#SBATCH --job-name=stain-norm-single-ref
+#SBATCH --job-name=vah-nmf-example
 #SBATCH --time=08:00:00
-#SBATCH --cpus-per-task=16
-#SBATCH --mem=64G
-#SBATCH --output=/home/sebasn/vahadane-trichrome/outputs/examples/bu_to_nw_left_single_ref_lasso_lars/slurm-%j.out
-#SBATCH --error=/home/sebasn/vahadane-trichrome/outputs/examples/bu_to_nw_left_single_ref_lasso_lars/slurm-%j.err
-
-
+#SBATCH --cpus-per-task=8
+#SBATCH --mem=48G
+#SBATCH --output=/flashscratch/sebasn/vahadane_runs/example_nmf_single_ref/slurm-%j.out
+#SBATCH --error=/flashscratch/sebasn/vahadane_runs/example_nmf_single_ref/slurm-%j.err
 
 set -euo pipefail
 
 REPO_DIR="/home/sebasn/vahadane-trichrome"
-SOURCE_IMAGE="/home/sebasn/vahadane-trichrome/examples/example_data/BU_2_-_2024-08-23_08.38.00.png"
-REFERENCE_IMAGE="/home/sebasn/vahadane-trichrome/examples/example_data/NW_NW_Trichrome_Box_1_LF_RF_SSCMH27_BASE_LF_04-27-11_-_2022-11-10_16.02.34_left.png"
-OUTPUT_DIR="/home/sebasn/vahadane-trichrome/outputs/examples/bu_to_nw_left_single_ref_lasso_lars"
+SOURCE_IMAGE="${REPO_DIR}/examples/example_data/BU_2_-_2024-08-23_08.38.00.png"
+REFERENCE_IMAGE="${REPO_DIR}/examples/example_data/NW_NW_Trichrome_Box_1_LF_RF_SSCMH27_BASE_LF_04-27-11_-_2022-11-10_16.02.34_left.png"
+OUTPUT_DIR="/flashscratch/sebasn/vahadane_runs/example_nmf_single_ref"
 OUTPUT_IMAGE="${OUTPUT_DIR}/normalized.png"
 FIT_STATE_PATH="${OUTPUT_DIR}/fit_state.npz"
 
@@ -35,6 +33,7 @@ poetry run vahadane-trichrome \
   --save-roi-images \
   --save-fit-state "${FIT_STATE_PATH}" \
   --apply-source-tissue-mask \
+  --backend nmf \
   --luminosity-threshold 0.65 \
   --use-connected-components true \
   --min-component-size-fraction 5e-4 \
@@ -42,16 +41,17 @@ poetry run vahadane-trichrome \
   --cumulative-foreground-coverage 0.995 \
   --connected-components-connectivity 2 \
   --connected-components-fail-safe true \
-  --regularizer 0.1 \
+  --regularizer 1e-4 \
   --n-components 3 \
   --sort-mode none \
   --max-tissue-pixels 8000 \
   --random-state 0 \
-  --fit-algorithm cd \
-  --transform-algorithm lasso_lars \
-  --dl-max-iter 35 \
-  --dl-transform-max-iter 300 \
-  --dl-n-jobs "${THREADS}" \
+  --nmf-init nndsvdar \
+  --nmf-solver cd \
+  --nmf-beta-loss frobenius \
+  --nmf-tol 1e-4 \
+  --nmf-max-iter 3000 \
+  --nmf-shuffle false \
   --max-concentration-scale-factor 4.0
 
-printf 'Normalization complete. Output: %s\n' "${OUTPUT_IMAGE}"
+printf 'NMF normalization complete. Output: %s\n' "${OUTPUT_IMAGE}"

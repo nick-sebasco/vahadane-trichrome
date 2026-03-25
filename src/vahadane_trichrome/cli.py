@@ -19,6 +19,16 @@ def _str_to_bool(value: str) -> bool:
     raise argparse.ArgumentTypeError(f"Invalid boolean value: {value}")
 
 
+def _normalize_backend(value: str) -> str:
+    normalized = value.strip().lower().replace("-", "_")
+    if normalized in {"dictionary_learning", "nmf"}:
+        return normalized
+    raise argparse.ArgumentTypeError(
+        "Invalid backend value: "
+        f"{value}. Expected one of: dictionary_learning, dictionary-learning, nmf."
+    )
+
+
 def _to_rgb_uint8(arr: np.ndarray) -> np.ndarray:
     """Convert loaded image arrays to RGB uint8 with shape (H, W, 3)."""
     image = np.asarray(arr)
@@ -51,6 +61,12 @@ def _build_parser() -> argparse.ArgumentParser:
         description="Run single- or multi-reference Vahadane-style trichrome normalization.",
     )
     parser.add_argument("--source", type=Path, required=True, help="Path to source RGB image.")
+    parser.add_argument(
+        "--backend",
+        type=_normalize_backend,
+        default="dictionary_learning",
+        help="Stain extraction backend. Use 'dictionary_learning' for the current sklearn dictionary approach or 'nmf' for sparse nonnegative matrix factorization.",
+    )
     parser.add_argument(
         "--reference",
         type=Path,
@@ -97,7 +113,12 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--connected-components-connectivity", type=int, default=2)
     parser.add_argument("--connected-components-fail-safe", type=_str_to_bool, default=True)
 
-    parser.add_argument("--regularizer", type=float, default=0.1)
+    parser.add_argument(
+        "--regularizer",
+        type=float,
+        default=None,
+        help="Regularization strength. Defaults to 0.1 for dictionary_learning and 1e-4 for nmf.",
+    )
     parser.add_argument("--n-components", type=int, default=3)
     parser.add_argument("--sort-mode", choices=("none", "dominant_channel"), default="none")
     parser.add_argument("--max-tissue-pixels", type=int, default=None)
@@ -116,6 +137,12 @@ def _build_parser() -> argparse.ArgumentParser:
         default=-1,
         help="Thread count passed to sklearn DictionaryLearning. Use -1 for all visible CPUs.",
     )
+    parser.add_argument("--nmf-init", default="nndsvdar")
+    parser.add_argument("--nmf-solver", choices=("cd", "mu"), default="cd")
+    parser.add_argument("--nmf-beta-loss", choices=("frobenius", "kullback-leibler", "itakura-saito"), default="frobenius")
+    parser.add_argument("--nmf-tol", type=float, default=1e-4)
+    parser.add_argument("--nmf-max-iter", type=int, default=3000)
+    parser.add_argument("--nmf-shuffle", type=_str_to_bool, default=False)
     parser.add_argument(
         "--max-concentration-scale-factor",
         type=float,
@@ -149,6 +176,7 @@ def _make_normalizer(args: argparse.Namespace) -> VahadaneTrichromeNormalizer:
         else None
     )
     return VahadaneTrichromeNormalizer(
+        backend=args.backend,
         luminosity_threshold=args.luminosity_threshold,
         use_connected_components=args.use_connected_components,
         min_component_size_fraction=args.min_component_size_fraction,
@@ -166,6 +194,12 @@ def _make_normalizer(args: argparse.Namespace) -> VahadaneTrichromeNormalizer:
         dl_max_iter=args.dl_max_iter,
         dl_transform_max_iter=args.dl_transform_max_iter,
         dl_n_jobs=args.dl_n_jobs,
+        nmf_init=args.nmf_init,
+        nmf_solver=args.nmf_solver,
+        nmf_beta_loss=args.nmf_beta_loss,
+        nmf_tol=args.nmf_tol,
+        nmf_max_iter=args.nmf_max_iter,
+        nmf_shuffle=args.nmf_shuffle,
         max_concentration_scale_factor=max_concentration_scale_factor,
     )
 
@@ -180,6 +214,7 @@ def run_cli(args: argparse.Namespace) -> int:
         raise ValueError("--save-roi-images currently requires exactly one reference image.")
 
     normalizer = _make_normalizer(args)
+    extractor_params = normalizer.extractor.get_params()
     if len(reference_rgbs) == 1:
         normalizer.fit(reference_rgbs[0])
         fit_mode = "single_target"
@@ -207,6 +242,7 @@ def run_cli(args: argparse.Namespace) -> int:
             "source": str(args.source),
             "references": [str(path) for path in args.reference],
             "output": str(args.output),
+            "backend": args.backend,
             "fit_mode": fit_mode,
             "multi_target_aggregation": args.multi_target_aggregation if len(reference_rgbs) > 1 else None,
             "multi_target_max_workers": args.multi_target_max_workers,
@@ -218,7 +254,7 @@ def run_cli(args: argparse.Namespace) -> int:
             "cumulative_foreground_coverage": args.cumulative_foreground_coverage,
             "connected_components_connectivity": args.connected_components_connectivity,
             "connected_components_fail_safe": args.connected_components_fail_safe,
-            "regularizer": args.regularizer,
+            "regularizer": extractor_params["regularizer"],
             "n_components": args.n_components,
             "sort_mode": args.sort_mode,
             "max_tissue_pixels": args.max_tissue_pixels,
@@ -228,6 +264,12 @@ def run_cli(args: argparse.Namespace) -> int:
             "dl_max_iter": args.dl_max_iter,
             "dl_transform_max_iter": args.dl_transform_max_iter,
             "dl_n_jobs": args.dl_n_jobs,
+            "nmf_init": args.nmf_init,
+            "nmf_solver": args.nmf_solver,
+            "nmf_beta_loss": args.nmf_beta_loss,
+            "nmf_tol": args.nmf_tol,
+            "nmf_max_iter": args.nmf_max_iter,
+            "nmf_shuffle": args.nmf_shuffle,
             "max_concentration_scale_factor": args.max_concentration_scale_factor,
         }
         (artifact_dir / "run_metadata.json").write_text(json.dumps(metadata, indent=2), encoding="utf-8")

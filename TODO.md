@@ -2,6 +2,16 @@
 
 ## Experiments
 
++ [x] try running at lower zarr levels 2
+-- see: /home/sebasn/vahadane-trichrome/outputs/bu10_to_nw_single_level2_cd_omp & /home/sebasn/vahadane-trichrome/outputs/bu10_to_nw_multi_level2_lars_lasso_lars for level 2 runs.  the results don't look as dark as level 4 but same anomally of lighter target shifting the source darker somehow?  
+-- Added new sanity test where we make a toy image with a dark target and light source and verify that the source gets darker in the normalized output: /home/sebasn/vahadane-trichrome/tests/test_vahadane_trichrome_image_sanity.py
+
+
++ [] swatch code to be post-sort
+
+-- it seems like the purple in target swatch is being used innappropriately
+-- optimization: take a levels 4 amount of random pixels from a level 0
+
 + [x] look into implementation of multi-reference
 -- A. Matts idea of concatenating images is very good, I can do that.
 -- B. Since it is mathematically valid to average W if we find W's separately for each image
@@ -64,6 +74,8 @@ Definition of done:
 + [] Show cluster image feature pc and show before after stain normaliztaion
 
 ## Engineering
+
++ [x] TiaToolbox has max_iter set to 3 which is too low, this implementation defaults to 100 and let's the user control.
 + [] add new threshold method and use connected components.
 + [x] Add load/ save model
 + [] Add NNMF backend (HistomicsTK/Wu-style) and benchmark against current method.
