@@ -1,7 +1,7 @@
 """Trichrome normalization examples.
 
 Run:
-python /home/sebasn/vahdane/examples/example.py
+python /home/sebasn/vahadane-trichrome/examples/vahadane_example.py
 
 Usage model:
 - One example is executed at a time.
