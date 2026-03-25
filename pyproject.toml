@@ -7,6 +7,9 @@ readme = "README.md"
 license = "MIT"
 packages = [{ include = "vahadane_trichrome", from = "src" }]
 
+[tool.poetry.scripts]
+vahadane-trichrome = "vahadane_trichrome.cli:main"
+
 [tool.poetry.dependencies]
 python = ">=3.11,<3.13"
 numpy = "^2.2.0"
