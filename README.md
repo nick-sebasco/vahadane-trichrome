@@ -22,6 +22,7 @@ This project focuses on trichrome-first normalization so you can:
 
 - `VahadaneTrichromeExtractor`
 - `VahadaneTrichromeNormalizer`
+- Validation helpers for cohort Wasserstein distance and structure-preserving SSIM audits
 - Source-to-target stain basis row alignment for 3 components
 - Optional source tissue masking during transform
 - Robust scientific tests for concentration recovery, alignment, sparsity, and structure-preservation sanity
@@ -120,6 +121,75 @@ print(roi_outputs)
 print(swatch_outputs)
 ```
 
+### Example 4: Validate batch-effect reduction across cohorts
+
+```python
+from vahadane_trichrome import cohort_wasserstein_matrix
+from vahadane_trichrome import summarize_reference_cohort_improvement
+
+# Run once on raw cohorts.
+before = cohort_wasserstein_matrix(
+    {
+        "NW": nw_raw_paths,
+        "BU": bu_raw_paths,
+        "KD": kd_raw_paths,
+    },
+    feature_domain="od",
+    luminosity_threshold=0.9,
+    max_pixels_per_image=50_000,
+)
+
+# Normalize images separately with your chosen parameters, then evaluate the
+# resulting outputs in a second pass.
+after = cohort_wasserstein_matrix(
+    {
+        "NW": nw_raw_paths,
+        "BU": bu_normalized_paths,
+        "KD": kd_normalized_paths,
+    },
+    feature_domain="od",
+    luminosity_threshold=0.9,
+    max_pixels_per_image=50_000,
+)
+
+improvement = summarize_reference_cohort_improvement(
+    before,
+    after,
+    reference_cohort="NW",
+)
+
+print(before.distance_matrix)
+print(after.distance_matrix)
+print(improvement.deltas)
+```
+
+### Example 5: Validate structure preservation with SSIM
+
+```python
+from vahadane_trichrome import paired_structural_similarity
+
+result = paired_structural_similarity(
+    sources=source_paths,
+    transformed=normalized_paths,
+    feature_domain="lab_l",
+    luminosity_threshold=0.9,
+)
+
+print(result.mean_score)
+print(result.scores)
+```
+
+`cohort_wasserstein_matrix` only computes cohort-to-cohort Wasserstein distances on the images you pass in.
+It does not perform stain normalization internally, which keeps normalization settings under your control.
+It is useful for batch-effect assessment because normalization should reduce the distance between an external cohort and the reference cohort.
+`paired_structural_similarity` complements that by checking that normalization preserved tissue structure rather than simply forcing colors to match.
+
+Important assumptions and limitations:
+- Cohort Wasserstein distance here is based on pooled tissue-pixel feature distributions, not matched slide pairs or matched regions.
+- It is informative for batch-effect assessment, but it is not a pure stain-only metric because biology, tissue composition, masking quality, scanner effects, and artifacts can also shift the distributions.
+- It ignores spatial arrangement. Two cohorts can have similar color distributions but very different tissue structure.
+- Saving distribution plots alongside the scalar distances is often helpful for interpretation, especially when comparing before-vs-after normalization runs.
+
 ## Input expectations
 
 - RGB images as `np.uint8`
@@ -135,4 +205,3 @@ print(swatch_outputs)
 ## Planned next algorithmic step
 
 - Evaluate NNMF backend (HistomicsTK/Wu method) against current dictionary-learning behavior.
-

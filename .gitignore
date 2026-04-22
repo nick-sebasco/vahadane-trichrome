@@ -39,3 +39,6 @@ tests/test_outputs/
 # OS/editor noise
 .DS_Store
 Thumbs.db
+
+# LLM
+.codex
