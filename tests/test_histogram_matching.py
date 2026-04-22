@@ -8,6 +8,8 @@ import numpy as np
 import pytest
 
 from vahadane_trichrome import HistogramMatchingNormalizer
+from vahadane_trichrome import apply_histogram_lut
+from vahadane_trichrome import build_cohort_histogram_specification_lut
 from vahadane_trichrome import histogram_specification
 from vahadane_trichrome.cli import _build_parser
 from vahadane_trichrome.cli import run_cli
@@ -22,6 +24,10 @@ def _channel_histograms(image: np.ndarray) -> np.ndarray:
         [np.bincount(image[..., idx].ravel(), minlength=256) for idx in range(image.shape[-1])],
         axis=0,
     )
+
+
+def _pooled_channel_histograms(images: list[np.ndarray]) -> np.ndarray:
+    return np.sum([_channel_histograms(image) for image in images], axis=0)
 
 
 def test_histogram_specification_is_stable_when_source_equals_target() -> None:
@@ -102,8 +108,50 @@ def test_histogram_matching_normalizer_fit_transform_matches_function() -> None:
 def test_histogram_matching_normalizer_requires_fit_first() -> None:
     source = np.zeros((8, 8, 3), dtype=np.uint8)
 
-    with pytest.raises(RuntimeError, match="Run fit\\(\\) first"):
+    with pytest.raises(RuntimeError, match="Run fit\\(\\) or fit_multi_source_target\\(\\) first"):
         HistogramMatchingNormalizer().transform(source)
+
+
+def test_cohort_histogram_lut_matches_single_image_histogram_specification() -> None:
+    rng = np.random.default_rng(20260326)
+    source = rng.integers(0, 100, size=(32, 32, 3), dtype=np.uint8)
+    target = rng.integers(120, 240, size=(32, 32, 3), dtype=np.uint8)
+
+    learned_lut = build_cohort_histogram_specification_lut([source], [target])
+    matched = apply_histogram_lut(source, learned_lut)
+    direct = histogram_specification(source, target)
+
+    np.testing.assert_array_equal(matched, direct)
+
+
+def test_histogram_matching_normalizer_fit_multi_source_target_moves_sources_toward_target_cohort() -> None:
+    rng = np.random.default_rng(20260327)
+    sources = [
+        rng.integers(10, 80, size=(40, 40, 3), dtype=np.uint8),
+        rng.integers(15, 90, size=(40, 40, 3), dtype=np.uint8),
+        rng.integers(20, 100, size=(40, 40, 3), dtype=np.uint8),
+    ]
+    targets = [
+        rng.integers(140, 210, size=(40, 40, 3), dtype=np.uint8),
+        rng.integers(150, 220, size=(40, 40, 3), dtype=np.uint8),
+        rng.integers(160, 230, size=(40, 40, 3), dtype=np.uint8),
+    ]
+
+    normalizer = HistogramMatchingNormalizer(luminosity_threshold=1.0)
+    normalizer.fit_multi_source_target(sources, targets)
+    transformed = [normalizer.transform(source, apply_source_tissue_mask=False) for source in sources]
+
+    target_hist = _pooled_channel_histograms(targets)
+    source_hist = _pooled_channel_histograms(sources)
+    transformed_hist = _pooled_channel_histograms(transformed)
+
+    source_distance = np.abs(source_hist - target_hist).sum(axis=1)
+    transformed_distance = np.abs(transformed_hist - target_hist).sum(axis=1)
+
+    assert normalizer.fit_mode == "multi_source_target"
+    assert normalizer.channel_luts is not None
+    assert normalizer.channel_luts.shape == (3, 256)
+    assert np.all(transformed_distance < source_distance)
 
 
 def test_histogram_specification_rejects_non_uint8_inputs() -> None:

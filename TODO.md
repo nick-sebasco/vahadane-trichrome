@@ -1,5 +1,28 @@
 # Internal TODO (gitignored)
 
+
++ [x] make slides
++ [x] how do i describe in picture what its doing color histogram normalization
++ [x] how do we convey the math+ make intended audience ss
+
++ [] two very different images, transform toward chosen target individeual also do multi source transformation.  
+
++ [x] histogram matching should be done at level 0.
+
+## 2 component vahadane
+This section we disregard the 3rd stain component (dark nuclei)
+
++ [x] create NW multi-target
++ [] train vahadane stain normalization model
++ [] reuse stain normalization model from above and apply to all BU & kadmon images.
++ [] run feature extraction pipeline on new stain normalized features
++ [] Do before/ after PCA analysis
+
++ [x] Experiment with 2 component Vahdane
++ [x] multi-target histogram matching.  we dont want just a single reference hiostogram.  we want multiple targets and multiple sources then once we have learnd that mapping we apply to all indoividual source.
+-- see slides: 
+https://docs.google.com/presentation/d/1YiNX2aigXzY6Xy10B56pwwOZCwQf8xyQLs0ASHf77OQ/edit?usp=sharing
+
 ## Experiments
 
 + [x] try running at lower zarr levels 2
@@ -7,7 +30,7 @@
 -- Added new sanity test where we make a toy image with a dark target and light source and verify that the source gets darker in the normalized output: /home/sebasn/vahadane-trichrome/tests/test_vahadane_trichrome_image_sanity.py
 
 
-+ [] swatch code to be post-sort
++ [x] swatch code to be post-sort
 
 -- it seems like the purple in target swatch is being used innappropriately
 -- optimization: take a levels 4 amount of random pixels from a level 0
@@ -27,45 +50,6 @@
 + [] how do we evaluate how well vahadane is working
 
 + [] Add cohort-based Wasserstein distance evaluation (paper-inspired)
-Goal:
-- Quantify stain-normalization consistency by comparing a reference cohort (ex: NW)
-	to itself and to external cohorts (ex: BU, KD) using pairwise Wasserstein distances.
-
-Implementation plan:
-- Add utility function for cohort evaluation:
-	- input: cohorts dict[str, list[path]], reference_cohort key
-	- configurable feature domain: "od" (default), optional "lab_l"
-	- optional tissue masking using luminosity threshold
-	- optional per-image pixel subsampling cap for runtime control
-- Implement 1D Wasserstein in pure NumPy (no new hard dependency):
-	- validate against SciPy in tests when SciPy is available (optional test branch)
-	- use scalar distributions consistently (do not pool unrelated channels silently)
-- Compute and return:
-	- reference internal pair distances: ref <-> ref
-	- cross distances: ref <-> other cohort for each other cohort
-	- summary statistics per comparison: n_pairs, mean, std, median, p05, p95
-- Add LLN/convergence analysis helper:
-	- randomize pair order
-	- plot running mean Wasserstein vs number of pairs
-	- verify convergence behavior for increasing sample size
-
-Validation / experiments:
-- Run NW as reference cohort:
-	- NW <-> NW (internal baseline)
-	- NW <-> BU
-	- NW <-> KD
-- Expectation: mean(NW<->NW) < mean(NW<->BU) and mean(NW<->NW) < mean(NW<->KD)
-- Repeat with fixed random seeds to check stability.
-
-Artifacts to save:
-- CSV/JSON summary table of pairwise statistics
-- LLN convergence plots per comparison
-- optional histogram/KDE overlays for distance distributions
-
-Definition of done:
-- Utility callable from script/notebook with arbitrary number of cohorts
-- Unit tests for 1D Wasserstein numerical sanity (symmetry, identity, shift behavior)
-- End-to-end run on NW/BU/KD with saved outputs and brief interpretation note
 
 + [] show within slide normalization
 + [] show within cohort normalization
@@ -76,9 +60,9 @@ Definition of done:
 ## Engineering
 
 + [x] TiaToolbox has max_iter set to 3 which is too low, this implementation defaults to 100 and let's the user control.
-+ [] add new threshold method and use connected components.
++ [x] add new threshold method and use connected components.
 + [x] Add load/ save model
-+ [] Add NNMF backend (HistomicsTK/Wu-style) and benchmark against current method.
++ [x] Add NNMF backend (HistomicsTK/Wu-style) and benchmark against current method.
 + [] Add the smart patch based strategy from the paper
 
 As explained in Sections III-A and III-B, a majority of computational time of SPCN is spent in the iterative optimization of SNMF, which slows its performance on WSI, especially when a computer RAM is limited with respect to the size of the WSI. Therefore, we propose a novel acceleration scheme for estimation of global color appearance matrix of a WSI based on smart patch sampling and patch-wise stain separation. The patches have the same resolution as the original WSI to preserve local structures, which could have been lost by using downsampling -- a trivial alternative. 
